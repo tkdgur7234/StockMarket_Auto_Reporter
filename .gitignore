@@ -1,0 +1,22 @@
+# .gitignore
+
+# 1. 가상환경 폴더 (용량이 크고 컴퓨터마다 다름)
+venv/
+env/
+.venv/
+
+# 2. 파이썬 컴파일 파일 (실행 시 자동생성되는 부산물)
+__pycache__/
+*.py[cod]
+
+# 3. 환경변수 파일 
+.env
+.env.local
+
+# 4. OS 시스템 파일 (맥/윈도우 찌꺼기)
+.DS_Store
+Thumbs.db
+
+# 5. IDE 설정 파일 (VS Code 설정 등은 개인 취향이므로 제외)
+.vscode/
+.idea/
