@@ -1,7 +1,6 @@
-# backend/routers/report.py
-
 from fastapi import APIRouter
-from services.briefing_market_condition import get_market_summary_markdown, get_sp500_map_image 
+from services.briefing_market_index import get_market_summary_markdown, get_sp500_map_image 
+from services.economy_indicators import get_economy_indicators
 
 router = APIRouter(
     prefix="/report",  # 이 라우터의 모든 주소 앞에 /report가 붙음
@@ -18,7 +17,6 @@ def generate_market_indicators():
         "status": "success",
         "market_summary_markdown": markdown_table
     }
-
 
 router = APIRouter(
     prefix="/report",
@@ -41,3 +39,18 @@ def fetch_sp500_map():
             "status": "error", 
             "message": "이미지 캡처 실패"
         }
+    
+# 1-3. FRED & Forex Factory 경제 지표 크롤링 엔드포인트
+@router.post("/economy-indicators")
+def fetch_economy_indicators():
+    """
+    1-3. FRED & Forex Factory 경제 지표 크롤링
+    """
+    data = get_economy_indicators()
+    return {
+        "status": "success",
+        "data": data 
+        # n8n은 이 data 리스트를 받아서 SplitInBatches로 돌리거나 바로 IF 노드 태우면 됨
+    }
+
+
