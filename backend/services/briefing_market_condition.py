@@ -1,8 +1,9 @@
-# backend/services/stock_data.py
-
 import yfinance as yf
 import pandas as pd
 import math
+import requests
+import base64
+import os
 
 TICKERS = {
     "다우 존스": "^DJI",
@@ -16,6 +17,7 @@ TICKERS = {
     "달러 인덱스": "DX-Y.NYB"
 }
 
+# 1-1. 각종 지표 데일리 시황 마크다운 생성
 def get_market_summary_markdown():
     symbols = list(TICKERS.values())
     
@@ -92,3 +94,42 @@ def get_market_summary_markdown():
 
     header = "| 지표 | 현재가 | 변동률 |\n| :--- | :---: | :---: |"
     return header + "\n" + "\n".join(rows)
+
+# 1-2. S&P 500 Map 이미지(Base64) 생성
+def get_sp500_map_image():
+    """
+    ApiFlash를 사용하여 S&P 500 Map(Finviz)을 캡처하고
+    Base64 인코딩된 이미지 문자열을 반환함
+    """
+    access_key = os.getenv("APIFLASH_ACCESS_KEY")
+    if not access_key:
+        raise ValueError("APIFLASH_ACCESS_KEY가 .env 파일에 없습니다.")
+
+    # n8n 스크린샷에 있던 파라미터 그대로 적용
+    url = "https://api.apiflash.com/v1/urltoimage"
+    params = {
+        "access_key": access_key,
+        "url": "https://finviz.com/map.ashx?t=sec",
+        "element": "#canvas-wrapper",  # 지도 부분만 깔끔하게 캡처
+        "response_type": "image",
+        "format": "png",
+        "quality": 100,
+        "width": 1920,
+        "height": 1080,
+        "wait_until": "page_loaded"    # 지도가 다 뜰 때까지 대기
+    }
+
+    try:
+        # 1. API 호출 (이미지 다운로드)
+        response = requests.get(url, params=params)
+        response.raise_for_status() # 200 OK 아니면 에러 발생시킴
+
+        # 2. 바이너리 이미지를 Base64 문자열로 변환
+        # (이메일 본문에 바로 넣기 위함)
+        img_base64 = base64.b64encode(response.content).decode("utf-8")
+        
+        return img_base64
+
+    except Exception as e:
+        print(f"ApiFlash Error: {e}")
+        return None # 실패 시 None 반환
