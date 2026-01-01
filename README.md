@@ -71,3 +71,9 @@ Daily Create Function
 1-4. Most Imapct Market News
 뉴스 정확도 개선
 
+(25-1-2)
+[1-1] 원달러 환율 추가
+1번 기능 조합해서 웹페이지 구현
+<img width="633" height="903" alt="image" src="https://github.com/user-attachments/assets/1fbfddba-7815-4450-9f2a-4b9c51319921" />
+<img width="639" height="829" alt="image" src="https://github.com/user-attachments/assets/9ba404bc-0b10-4627-8b97-f3e2e3767078" />
+
