@@ -1,10 +1,11 @@
 import yfinance as yf
 import pandas as pd
-import math
 import requests
-import base64
+from bs4 import BeautifulSoup
 import os
+import base64
 
+# 1. 감시할 티커 목록 (KRW=X 제거함)
 TICKERS = {
     "다우 존스": "^DJI",
     "S&P 500": "^GSPC",
@@ -14,39 +15,63 @@ TICKERS = {
     "금": "GC=F",
     "비트코인": "BTC-USD",
     "미 국채 10년": "^TNX",
-    "달러 인덱스": "DX-Y.NYB"
+    "달러 인덱스 / 환율": "DX-Y.NYB"
 }
 
-# 1-1. 각종 지표 데일리 시황 마크다운 생성
+# 네이버 금융에서 원달러 환율 크롤링
+def get_naver_usd_rate():
+    """
+    네이버 금융에서 실시간 원달러 환율(매매기준율) 크롤링
+    """
+    try:
+        url = "https://finance.naver.com/marketindex/"
+        # 봇 탐지 방지용 헤더
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            # 네이버 금융 환율 섹션의 '미국 USD' 값 추출
+            usd_item = soup.select_one("#exchangeList > li.on > a.head.usd > div > span.value")
+            if usd_item:
+                # 쉼표(,) 제거 후 float 변환
+                return float(usd_item.text.replace(",", ""))
+    except Exception as e:
+        print(f"Naver Crawl Error: {e}")
+    
+    return 0.0 # 실패 시 0.0 반환
+
+# 1-1. 마켓 요약 마크다운 생성
 def get_market_summary_markdown():
     symbols = list(TICKERS.values())
     
-    # period="5d"로 늘려서 주말/휴일 이슈 방어 (데이터 양 조금 늘려도 속도 차이 없음)
+    # yfinance 데이터 다운로드
     df = yf.download(symbols, period="5d", group_by='ticker', threads=True, progress=False, auto_adjust=False)
 
     rows = []
     
+    # [1단계] 네이버에서 환율 가져오기 (Source 변경)
+    krw_rate = get_naver_usd_rate()
+    # 만약 크롤링 실패하면 0.0원이 뜸
+
+    # [2단계] 표 생성 루프
     for name, symbol in TICKERS.items():
+        if symbol == "KRW=X":
+            continue
         try:
-            # 1. 해당 심볼의 데이터 프레임 추출
             if len(symbols) > 1:
-                # 멀티 인덱스 컬럼 처리 (가끔 yfinance 버전에 따라 구조가 다를 수 있음)
                 try:
                     data = df[symbol]
                 except KeyError:
-                    # 티커가 컬럼에 없는 경우 (다운로드 실패 등)
                     rows.append(f"| {name} | N/A | ⚠️ 티커 오류 |")
                     continue
             else:
                 data = df
 
-            # 2. 컬럼명 찾기 (Close 또는 Adj Close)
-            # 대소문자 이슈 방지를 위해 컬럼명을 리스트로 변환 후 찾기
+            # 컬럼명 찾기
             cols = [c.lower() for c in data.columns]
-            
             target_col = None
             if 'close' in cols:
-                # 원본 컬럼명 복구
                 target_col = data.columns[cols.index('close')]
             elif 'adj close' in cols:
                 target_col = data.columns[cols.index('adj close')]
@@ -55,31 +80,31 @@ def get_market_summary_markdown():
                 rows.append(f"| {name} | N/A | ⚠️ 컬럼 없음 |")
                 continue
 
-            # 3. [핵심 수정] NaN 값 제거 후 유효한 데이터만 추출
-            # 비트코인 시간대 때문에 생긴 빈 행(NaN)을 제거하고, 진짜 데이터가 있는 마지막 행을 잡음
+            # 유효 데이터 필터링
             valid_series = data[target_col].dropna()
 
             if valid_series.empty:
-                rows.append(f"| {name} | N/A | ⚠️ 데이터 없음 (Empty) |")
+                rows.append(f"| {name} | N/A | ⚠️ 데이터 없음 |")
                 continue
 
-            last_close = float(valid_series.iloc[-1]) # 유효한 마지막 값 (현재가/종가)
+            last_close = float(valid_series.iloc[-1])
             
-            # 전일 종가 (데이터가 2개 이상일 때만)
             if len(valid_series) >= 2:
                 prev_close = float(valid_series.iloc[-2])
             else:
                 prev_close = last_close
 
-            # 4. 변동률 계산
             change_amt = last_close - prev_close
             change_pct = (change_amt / prev_close) * 100 if prev_close != 0 else 0.0
 
-            # 5. 포맷팅
             emoji = "🔴" if change_pct >= 0 else "🔵"
             sign = "+" if change_pct >= 0 else ""
             
-            if symbol in ["^TNX", "DX-Y.NYB"]:
+            # 포맷팅
+            if symbol == "DX-Y.NYB":
+                # [수정] 네이버에서 가져온 krw_rate 사용
+                price_str = f"{last_close:.2f} / {krw_rate:,.2f}원"
+            elif symbol == "^TNX":
                 price_str = f"{last_close:.3f}"
             elif symbol == "BTC-USD":
                 price_str = f"{last_close:,.0f}"
@@ -97,39 +122,26 @@ def get_market_summary_markdown():
 
 # 1-2. S&P 500 Map 이미지(Base64) 생성
 def get_sp500_map_image():
-    """
-    ApiFlash를 사용하여 S&P 500 Map(Finviz)을 캡처하고
-    Base64 인코딩된 이미지 문자열을 반환함
-    """
     access_key = os.getenv("APIFLASH_ACCESS_KEY")
-    if not access_key:
-        raise ValueError("APIFLASH_ACCESS_KEY가 .env 파일에 없습니다.")
-
-    # n8n 스크린샷에 있던 파라미터 그대로 적용
+    if not access_key: return None
+    
     url = "https://api.apiflash.com/v1/urltoimage"
     params = {
         "access_key": access_key,
         "url": "https://finviz.com/map.ashx?t=sec",
-        "element": "#canvas-wrapper",  # 지도 부분만 깔끔하게 캡처
+        "element": "#canvas-wrapper",
         "response_type": "image",
         "format": "png",
         "quality": 100,
         "width": 1920,
         "height": 1080,
-        "wait_until": "page_loaded"    # 지도가 다 뜰 때까지 대기
+        "wait_until": "page_loaded"
     }
 
     try:
-        # 1. API 호출 (이미지 다운로드)
         response = requests.get(url, params=params)
-        response.raise_for_status() # 200 OK 아니면 에러 발생시킴
-
-        # 2. 바이너리 이미지를 Base64 문자열로 변환
-        # (이메일 본문에 바로 넣기 위함)
-        img_base64 = base64.b64encode(response.content).decode("utf-8")
-        
-        return img_base64
-
+        response.raise_for_status()
+        return base64.b64encode(response.content).decode("utf-8")
     except Exception as e:
         print(f"ApiFlash Error: {e}")
-        return None # 실패 시 None 반환
+        return None
